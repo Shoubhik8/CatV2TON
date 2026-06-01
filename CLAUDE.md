@@ -6,6 +6,37 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 CatV2TON is a DiT-based method for Vision-Based Virtual Try-On (V2TON) using Temporal Concatenation of video frames with garment conditions. It supports both image try-on (VITONHD, DressCode) and video try-on (ViViD-S, VVT). Paper: arXiv 2501.11325. Pretrained weights live on HuggingFace at `zhengchong/CatV2TON`.
 
+## Installation
+
+Setting this up on a new machine has a few hard constraints that aren't obvious — follow these steps in order. Dependencies are listed in [requirements.txt](requirements.txt).
+
+**1. Create a Python 3.9 environment.** Python 3.9 is *required* (not just recommended): the vendored [detectron2/](detectron2/) ships a prebuilt `_C.cpython-39-x86_64-linux-gnu.so` that only loads on CPython 3.9. Other versions fail with `ModuleNotFoundError: No module named 'detectron2._C'`.
+```bash
+conda create -n catvton python=3.9 -y
+conda activate catvton
+```
+
+**2. Make sure pip is compatible with 3.9.** pip >= 26 dropped Python 3.9 and crashes on import (`TypeError: dataclass() got an unexpected keyword argument 'slots'`). If you hit that, downgrade:
+```bash
+python -m pip install "pip<26"   # if that pip is already broken, bootstrap: conda install -n catvton "pip<26"
+```
+
+**3. Install everything via requirements.txt.** torch/torchvision are pinned to `2.1.2+cu121` inside the file (with the PyTorch `--extra-index-url`), so a single command does it all:
+```bash
+pip install -r requirements.txt
+```
+- **CUDA:** the file targets `cu121`, which runs on any driver supporting CUDA >= 12.1 (check `nvidia-smi`). For a different CUDA, edit the `--extra-index-url` line AND the `+cu121` tags in [requirements.txt](requirements.txt) (e.g. `cu118`).
+- **Do NOT bump torch to >= 2.4.** The detectron2 `.so` was built against `c10::optional`, which PyTorch 2.4 replaced with `std::optional`; newer torch fails with `undefined symbol: ...zeros_like...c10..optional...`. Valid range is `>=2.0,<2.4`.
+- The HuggingFace stack (`diffusers==0.31.0`, `transformers==4.46.2`, `accelerate==1.0.1`) is pinned to the EasyAnimate-era APIs the vendored code uses. Newer `transformers` (>= 4.56) drops torch < 2.2 support and crashes on `torch.utils._pytree.register_pytree_node`.
+
+**4. Verify the install** (no GPU or checkpoints needed — just import success):
+```bash
+python -c "from detectron2 import _C; print('detectron2 _C ok')"
+python inference.py --help
+```
+
+**5. Run.** Inference needs a CUDA GPU and the HuggingFace checkpoints (`zhengchong/CatV2TON`, `alibaba-pai/EasyAnimateV4-XL-2-InP`), which auto-download on first run via `snapshot_download`. See **Common commands** below.
+
 ## Common commands
 
 All entry points are top-level scripts; there is no build system, package manifest, or test suite.

@@ -1,0 +1,67 @@
+# CatV2TON dependencies (Python 3.9, Linux x86_64 — detectron2 ships a prebuilt 3.9 .so).
+# Verified working set; install with:  pip install -r requirements.txt
+# detectron2/, densepose/, easyanimate/ are VENDORED in this repo — do NOT pip install them.
+
+# --- Core deep-learning stack ---
+# torch/torchvision are pinned to the cu121 build. IMPORTANT: the vendored detectron2/_C .so
+# was compiled against PyTorch 2.x using c10::optional, which PyTorch 2.4 REMOVED
+# (-> std::optional), so torch MUST be >=2.0,<2.4 or `from detectron2 import _C` fails with
+# "undefined symbol: ...zeros_like...c10..optional...". 2.1.2 is the verified version.
+# cu121 wheels run fine on newer drivers; for a different CUDA, change BOTH the URL below
+# and the +cu121 local tags (e.g. cu118 -> torch==2.1.2+cu118).
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch==2.1.2+cu121
+torchvision==0.16.2+cu121
+numpy<2.0.0
+einops
+
+# --- Diffusion / HuggingFace ---
+# Pinned to the EasyAnimate-era stack the vendored code targets (per EasyAnimate's own
+# requirements: diffusers>=0.30.1,<=0.31.0, transformers>=4.46.2, accelerate>=0.25.0).
+# These MUST stay compatible with torch 2.1.2: transformers >=4.56 drops torch<2.2 support
+# and crashes on `torch.utils._pytree.register_pytree_node`; diffusers >0.31 moves APIs the
+# vendored easyanimate/ imports (HunyuanDiT2DModel, get_2d_rotary_pos_embed, etc.).
+diffusers==0.31.0
+transformers==4.46.2
+accelerate==1.0.1
+huggingface-hub
+safetensors
+sentencepiece   # T5/HunyuanDiT tokenizers used by the multi-text-encoder pipeline
+ftfy
+regex
+
+# --- Image / video IO ---
+opencv-python
+Pillow
+imageio
+decord
+av==15.1.0     # PyAV — densepose/__init__ eagerly imports its video_keyframe_dataset
+
+# --- Config / utilities ---
+omegaconf
+hydra-core
+pyyaml
+packaging
+tqdm
+rich
+scipy
+matplotlib
+
+# --- detectron2 / densepose runtime deps (vendored code imports these) ---
+fvcore
+iopath
+pycocotools
+cloudpickle
+tabulate
+termcolor
+shapely
+timm
+
+# --- Evaluation metrics (eval_*_metrics.py) ---
+clean-fid      # imports as `cleanfid` (eval_*_metrics.py)
+torchmetrics
+prettytable
+cd-fvd         # imports as `cdfvd` — eval_video_metrics.py: `from cdfvd import fvd`
+
+# --- Optional accelerators / extras (uncomment if needed) ---
+# xformers     # memory-efficient attention; code guards with is_xformers_available()
