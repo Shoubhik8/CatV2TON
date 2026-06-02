@@ -178,12 +178,15 @@ def run_image(args, pipeline: V2TONPipeline, automasker: AutoMasker):
             generator=generator,
         )
         result_pil = results[0]
+        
 
         if args.repaint:
             result_pil = image_repaint(person_pil, mask_pil, result_pil)
 
         out = output_path(args.output_dir, args.person, garment_path, category, "png")
         result_pil.save(out)
+        # The fix below is to incorporate multiple images try on at the same time
+        # person_pil = result_pil
         print(f"[image] wrote {out}")
 
 
