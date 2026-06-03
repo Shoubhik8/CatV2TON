@@ -9,10 +9,11 @@ import torch
 import torchvision.transforms as T
 from einops import rearrange
 from huggingface_hub import snapshot_download
-from PIL import Image
+from PIL import Image, ImageOps
 from torchvision.io import read_video, write_video
 from tqdm import tqdm
 
+from data.utils import paste_back
 from modules.cloth_masker import AutoMasker
 from modules.pipeline import V2TONPipeline
 
@@ -66,6 +67,13 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--mixed_precision", choices=list(PRECISION_DTYPES), default="bf16")
     parser.add_argument("--repaint", action="store_true")
+    parser.add_argument(
+        "--no_auto_crop",
+        action="store_true",
+        help="Disable automatic person detection + crop (image mode). By default the person is "
+        "detected and tightly cropped (padded to 3:4) so in-the-wild full-frame photos match the "
+        "model's expected framing, then the result is pasted back into the original photo.",
+    )
 
     parser.add_argument(
         "--num_inference_steps",
@@ -153,7 +161,18 @@ def run_image(args, pipeline: V2TONPipeline, automasker: AutoMasker):
     os.makedirs(args.output_dir, exist_ok=True)
     size = (args.width, args.height)  # PIL.resize expects (W, H)
 
-    person_pil = Image.open(args.person).convert("RGB").resize(size, Image.BICUBIC)
+    # exif_transpose honours the camera orientation flag; without it a sideways
+    # phone photo is fed to the model squashed/rotated and produces garbage.
+    person_full = ImageOps.exif_transpose(Image.open(args.person)).convert("RGB")
+
+    # Detect + tightly crop the person (padded to 3:4) so the body fills the frame;
+    # the try-on result is pasted back into person_full before saving.
+    crop_box = None
+    if not args.no_auto_crop:
+        crop_box = automasker.detect_person_box(person_full, aspect_ratio=args.width / args.height)
+        if crop_box is None:
+            print("WARNING: no person detected; using the full frame (results may be poor).")
+    person_pil = (person_full.crop(crop_box) if crop_box is not None else person_full).resize(size, Image.BICUBIC)
 
     cond_cache = {}
     generator = torch.Generator(device="cuda").manual_seed(args.seed)
@@ -182,6 +201,10 @@ def run_image(args, pipeline: V2TONPipeline, automasker: AutoMasker):
 
         if args.repaint:
             result_pil = image_repaint(person_pil, mask_pil, result_pil)
+
+        # Paste the (cropped) try-on result back into the original full-frame photo.
+        if crop_box is not None:
+            result_pil = paste_back(person_full, result_pil, crop_box)
 
         out = output_path(args.output_dir, args.person, garment_path, category, "png")
         result_pil.save(out)

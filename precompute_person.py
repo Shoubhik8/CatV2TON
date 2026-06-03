@@ -70,6 +70,13 @@ def parse_args():
     parser.add_argument("--width", type=int, default=384)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--mixed_precision", choices=list(PRECISION_DTYPES), default="bf16")
+    parser.add_argument(
+        "--no_auto_crop",
+        action="store_true",
+        help="Disable automatic person detection + crop. By default the person is detected and "
+        "tightly cropped (padded to 3:4) so in-the-wild full-frame photos match the model's "
+        "expected framing.",
+    )
     return parser.parse_args()
 
 
@@ -129,7 +136,17 @@ def main():
 
     # exif_transpose honours the camera orientation flag; without it a sideways
     # phone photo is fed to the model squashed/rotated and produces garbage.
-    person_pil = ImageOps.exif_transpose(Image.open(args.person)).convert("RGB").resize(size, Image.BICUBIC)
+    person_full = ImageOps.exif_transpose(Image.open(args.person)).convert("RGB")
+
+    # Detect + tightly crop the person (padded to 3:4) so the body fills the frame.
+    # CatV2TON / SCHP / DensePose all expect a VITONHD-style framing; an in-the-wild
+    # full-frame photo with a small person otherwise yields a sloppy mask and low detail.
+    crop_box = None
+    if not args.no_auto_crop:
+        crop_box = automasker.detect_person_box(person_full, aspect_ratio=args.width / args.height)
+        if crop_box is None:
+            print("WARNING: no person detected; using the full frame (results may be poor).")
+    person_pil = (person_full.crop(crop_box) if crop_box is not None else person_full).resize(size, Image.BICUBIC)
     # Person latents and densepose are category-independent — encode them once.
     source_image = prepare_image(person_pil, device, dtype=weight_dtype)
 
@@ -141,8 +158,11 @@ def main():
             "mixed_precision": args.mixed_precision,
             "seed": args.seed,
         },
-        # Resized RGB person, kept so --repaint works at inference without AutoMasker.
+        # Resized RGB person (the crop), kept so --repaint works at inference without AutoMasker.
         "person_image": np.array(person_pil),  # uint8 (H, W, 3)
+        # Full exif-corrected frame + crop box so inference can paste the result back.
+        "orig_image": np.array(person_full),  # uint8 (H_orig, W_orig, 3)
+        "crop_box": crop_box,  # (left, top, right, bottom) or None
         "categories": {},
     }
 

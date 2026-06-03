@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 from modules.SCHP import SCHP  # type: ignore
 from modules.densepose import DensePose, densepose_to_rgb  # type: ignore
-from data.utils import read_video_frames
+from data.utils import pad_box_to_aspect, read_video_frames
 
 
 DENSE_INDEX_MAP = {
@@ -208,7 +208,36 @@ class AutoMasker:
 
     def process_schp_atr(self, image_or_path):
         return self.schp_processor_atr(image_or_path)
-        
+
+    @torch.no_grad()
+    def detect_person_box(self, image_pil: Image.Image, margin: float = 0.15, aspect_ratio: float = 3 / 4):
+        """Detect the main person and return a crop box padded to `aspect_ratio` (w/h).
+
+        Reuses the DensePose DefaultPredictor already loaded for masking (no extra model).
+        The highest-scoring detection is expanded by `margin` on each side, padded to the
+        target aspect ratio, and clamped to the image. Returns (left, top, right, bottom)
+        ints, or None if nothing is detected (caller should fall back to the full frame).
+        """
+        img = cv2.cvtColor(np.array(image_pil.convert("RGB")), cv2.COLOR_RGB2BGR)  # predictor expects BGR
+        instances = self.densepose_processor.predictor(img)["instances"]
+        if len(instances) == 0 or not instances.has("pred_boxes"):
+            return None
+
+        boxes = instances.pred_boxes.tensor.cpu().numpy()
+        scores = instances.scores.cpu().numpy() if instances.has("scores") else np.ones(len(boxes))
+        left, top, right, bottom = boxes[int(scores.argmax())]
+
+        w, h = image_pil.size
+        bw, bh = right - left, bottom - top
+        left -= margin * bw
+        right += margin * bw
+        top -= margin * bh
+        bottom += margin * bh
+        left, top = max(left, 0), max(top, 0)
+        right, bottom = min(right, w), min(bottom, h)
+        return pad_box_to_aspect((left, top, right, bottom), w, h, aspect_ratio)
+
+
     def preprocess_image(self, image_or_path):
         return {
             'densepose': self.densepose_processor(image_or_path, resize=1024),

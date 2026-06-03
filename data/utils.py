@@ -59,6 +59,48 @@ def densepose_processor(
         densepose_tensor = (densepose_tensor - 0.5) / 0.5
     return densepose_tensor
 
+def pad_box_to_aspect(box, img_w, img_h, aspect_ratio=3 / 4):
+    """Expand a (left, top, right, bottom) box so its width/height == aspect_ratio.
+
+    The shorter dimension is grown symmetrically around the box center, then the box is
+    shifted (not shrunk) to stay inside the image. Returns integer (left, top, right, bottom)
+    clamped to [0, img_w] x [0, img_h]. If the required size exceeds the image, the box is
+    capped to the image so the aspect is best-effort rather than exact.
+    """
+    left, top, right, bottom = box
+    bw, bh = right - left, bottom - top
+    cx, cy = left + bw / 2.0, top + bh / 2.0
+
+    # Grow the dimension that is too small for the target aspect ratio.
+    if bw / bh > aspect_ratio:
+        bh = bw / aspect_ratio  # too wide -> make taller
+    else:
+        bw = bh * aspect_ratio  # too tall -> make wider
+
+    # Cap to image size (keeps aspect as close as possible when the box doesn't fit).
+    bw = min(bw, img_w)
+    bh = min(bh, img_h)
+
+    left = cx - bw / 2.0
+    top = cy - bh / 2.0
+    # Shift inside the image bounds.
+    left = min(max(left, 0), img_w - bw)
+    top = min(max(top, 0), img_h - bh)
+    return (int(round(left)), int(round(top)), int(round(left + bw)), int(round(top + bh)))
+
+
+def paste_back(original_pil: Image.Image, result_pil: Image.Image, box):
+    """Paste a try-on `result_pil` back into a copy of `original_pil` at `box`.
+
+    `box` is the (left, top, right, bottom) crop that `result_pil` was produced from;
+    `result_pil` is resized to the box size before pasting. Returns the full-frame image.
+    """
+    left, top, right, bottom = box
+    out = original_pil.convert("RGB").copy()
+    out.paste(result_pil.convert("RGB").resize((right - left, bottom - top), Image.BICUBIC), (left, top))
+    return out
+
+
 def get_random_mask(shape):
     f, c, h, w = shape
     if f != 1:

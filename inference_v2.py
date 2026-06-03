@@ -26,6 +26,7 @@ import torch
 from huggingface_hub import snapshot_download
 from PIL import Image, ImageOps
 
+from data.utils import paste_back
 from modules.pipeline import V2TONPipeline, prepare_image
 
 
@@ -176,6 +177,11 @@ def run(args, pipeline: V2TONPipeline, cache: dict):
             person_pil = Image.fromarray(cache["person_image"])
             mask_pil = Image.fromarray(entry["mask_image"])
             result_pil = image_repaint(person_pil, mask_pil, result_pil)
+
+        # If the cache was built from an auto-cropped person, paste the (cropped) try-on
+        # result back into the original full-frame photo so the output matches the input.
+        if cache.get("crop_box") is not None and "orig_image" in cache:
+            result_pil = paste_back(Image.fromarray(cache["orig_image"]), result_pil, cache["crop_box"])
 
         out = output_path(args.output_dir, person_path, garment_path, category, "png")
         result_pil.save(out)
